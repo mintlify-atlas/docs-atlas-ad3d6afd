@@ -1,0 +1,356 @@
+---
+title: Deployment
+description: Deploy DeployableVM to Ethereum networks
+---
+
+This guide covers deploying the DeployableVM contract to Ethereum networks using Foundry's scripting capabilities and deterministic deployment.
+
+## Overview
+
+DeployableVM uses CREATE2 for deterministic deployment, ensuring the same contract address across all networks. This is crucial for cross-chain compatibility and predictable integrations.
+
+<Info>
+  Deterministic deployment means the contract will have the same address on all EVM chains, making it easy to integrate across multiple networks.
+</Info>
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- Foundry installed with the correct version (see [Installation Guide](/guides/installation))
+- A funded wallet with native tokens for gas fees
+- RPC endpoint for your target network
+- Block explorer API key (optional, for verification)
+
+## Environment Setup
+
+<Steps>
+  <Step title="Set up environment variables">
+    Export the required environment variables for deployment:
+
+    ```bash
+    export PK='your_private_key_here'
+    export ETH_RPC_URL='https://rpc.node.url.here'
+    export ETHERSCAN_API_KEY='your_api_key_here'
+    ```
+
+    <Warning>
+      Never commit your private key to version control. Use environment variables or a secure key management system.
+    </Warning>
+
+    <Tip>
+      The `ETHERSCAN_API_KEY` is only required if you plan to verify the contract on Etherscan-based block explorers. For other explorers, this may not be needed.
+    </Tip>
+  </Step>
+
+  <Step title="Verify you have the deployment script">
+    Ensure the deployment script exists at `script/DeployableVM.s.sol`:
+
+    ```solidity script/DeployableVM.s.sol
+    // SPDX-License-Identifier: LGPL-3.0-or-later
+    pragma solidity ^0.8.13;
+
+    import {DeployableVM} from "../src/DeployableVM.sol";
+    import {Script, console} from "forge-std/Script.sol";
+
+    contract DeployableVMScript is Script {
+        DeployableVM public weiVm;
+
+        function setUp() public {}
+
+        function run() public {
+            vm.startBroadcast();
+
+            // Use deterministic salt to deploy the contract
+            weiVm = new DeployableVM{salt: ""}();
+
+            vm.stopBroadcast();
+        }
+    }
+    ```
+
+    <Note>
+      The empty salt (`salt: ""`) ensures consistent deployment addresses across networks.
+    </Note>
+  </Step>
+</Steps>
+
+## Deployment Process
+
+### 1. Verify Deterministic Address
+
+Before broadcasting the deployment, verify the address that will be generated:
+
+```bash
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK"
+```
+
+<Info>
+  This simulates the deployment without broadcasting, showing you the address where the contract will be deployed.
+</Info>
+
+**Expected Output:**
+
+```
+Script ran successfully.
+Gas used: 1234567
+
+== Return ==
+weiVm: 0x... (predicted address)
+```
+
+### 2. Deploy to Network
+
+Once you've verified the address, deploy with the `--broadcast` flag:
+
+```bash
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast
+```
+
+<Warning>
+  This will spend real gas. Ensure your wallet has sufficient funds for the deployment transaction.
+</Warning>
+
+### 3. Deploy and Verify
+
+To deploy and automatically verify on the block explorer:
+
+```bash
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify
+```
+
+<Tip>
+  Automatic verification saves time and makes your contract immediately readable on block explorers.
+</Tip>
+
+## Multi-Network Deployment
+
+### Deploy to Multiple Networks
+
+<CodeGroup>
+
+```bash Ethereum Mainnet
+export ETH_RPC_URL='https://eth-mainnet.g.alchemy.com/v2/YOUR-API-KEY'
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify
+```
+
+```bash Arbitrum
+export ETH_RPC_URL='https://arb-mainnet.g.alchemy.com/v2/YOUR-API-KEY'
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify
+```
+
+```bash Optimism
+export ETH_RPC_URL='https://opt-mainnet.g.alchemy.com/v2/YOUR-API-KEY'
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify
+```
+
+```bash Polygon
+export ETH_RPC_URL='https://polygon-mainnet.g.alchemy.com/v2/YOUR-API-KEY'
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify
+```
+
+```bash Base
+export ETH_RPC_URL='https://base-mainnet.g.alchemy.com/v2/YOUR-API-KEY'
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify
+```
+
+</CodeGroup>
+
+## Post-Deployment Steps
+
+<Steps>
+  <Step title="Commit deployment files">
+    After successful deployment, Foundry automatically generates deployment receipts in the `broadcast/` directory:
+
+    ```
+    broadcast/DeployableVM.s.sol/
+    ├── 1/         # Ethereum Mainnet
+    ├── 10/        # Optimism
+    ├── 42161/     # Arbitrum
+    ├── 137/       # Polygon
+    └── 8453/      # Base
+    ```
+
+    Commit these files to your repository:
+
+    ```bash
+    git add broadcast/
+    git commit -m "Add deployment receipts for chain X"
+    ```
+
+    <Info>
+      These files contain transaction hashes, gas usage, and deployment addresses for audit trails.
+    </Info>
+  </Step>
+
+  <Step title="Update networks.json">
+    Generate the deployment addresses file:
+
+    ```bash
+    bash dev/generate-networks-file.sh > networks.json
+    ```
+
+    This creates a JSON file mapping chain IDs to deployment addresses:
+
+    ```json networks.json
+    {
+      "1": "0x...",
+      "10": "0x...",
+      "137": "0x...",
+      "8453": "0x...",
+      "42161": "0x..."
+    }
+    ```
+
+    Commit the updated file:
+
+    ```bash
+    git add networks.json
+    git commit -m "Update deployment addresses"
+    ```
+  </Step>
+
+  <Step title="Verify deployment">
+    Verify the contract is working correctly:
+
+    ```bash
+    forge test --fork-url "$ETH_RPC_URL"
+    ```
+
+    Or test a specific deployed address:
+
+    ```bash
+    cast call <DEPLOYED_ADDRESS> "WEIROLL_SINGLETON()" --rpc-url "$ETH_RPC_URL"
+    ```
+  </Step>
+</Steps>
+
+## Deployment Addresses
+
+The official deployment addresses are maintained in the [`networks.json`](https://github.com/weiroll/weiroll/blob/main/networks.json) file. Current deployments include:
+
+- **Ethereum Mainnet** (Chain ID: 1)
+- **Optimism** (Chain ID: 10)
+- **Gnosis Chain** (Chain ID: 100)
+- **Polygon** (Chain ID: 137)
+- **Base** (Chain ID: 8453)
+- **Arbitrum One** (Chain ID: 42161)
+- **Avalanche C-Chain** (Chain ID: 43114)
+- **Sepolia Testnet** (Chain ID: 11155111)
+
+## Troubleshooting
+
+### Address Mismatch
+
+<Warning>
+  If you get a different deployment address than expected, ensure you're using the correct Foundry version:
+
+  ```bash
+  foundryup -C cb9dfae298fe0b5a5cdef2536955f50b8c7f0bf5
+  ```
+</Warning>
+
+### Insufficient Funds
+
+If deployment fails with "insufficient funds":
+
+```bash
+# Check your balance
+cast balance <YOUR_ADDRESS> --rpc-url "$ETH_RPC_URL"
+
+# Estimate gas cost
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  | grep "Gas used"
+```
+
+### Verification Failures
+
+If automatic verification fails:
+
+```bash
+# Manually verify after deployment
+forge verify-contract \
+  --chain-id <CHAIN_ID> \
+  --constructor-args $(cast abi-encode "constructor()") \
+  <CONTRACT_ADDRESS> \
+  src/DeployableVM.sol:DeployableVM
+```
+
+### RPC Issues
+
+If you encounter RPC timeout or connection issues:
+
+- Increase the timeout: `--timeout 30000`
+- Use a different RPC provider
+- Add retry flags: `--retries 3`
+
+```bash
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  -vvvv \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --broadcast \
+  --verify \
+  --timeout 30000 \
+  --retries 3
+```
+
+## Best Practices
+
+1. **Always simulate first**: Run without `--broadcast` to verify the deployment
+2. **Use deterministic deployment**: Keep the empty salt for consistent addresses
+3. **Verify immediately**: Use `--verify` flag to verify during deployment
+4. **Document addresses**: Commit deployment files and update `networks.json`
+5. **Test on testnet**: Deploy to testnets (like Sepolia) before mainnet
+6. **Secure your keys**: Never expose private keys in scripts or version control
+
+## Next Steps
+
+<Tip>
+  Now that DeployableVM is deployed, integrate it into your contracts using the [Integration Guide](/guides/integration).
+</Tip>
+
+## Additional Resources
+
+- [Foundry Book - Deployment](https://book.getfoundry.sh/forge/deploying)
+- [CREATE2 Deterministic Deployment](https://eips.ethereum.org/EIPS/eip-1014)
+- [Networks Configuration](https://github.com/weiroll/weiroll/blob/main/networks.json)

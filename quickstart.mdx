@@ -1,80 +1,256 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quickstart'
+description: 'Get started with Weiroll DeployableVM in your Solidity project'
 ---
 
-## Get started in three steps
+Weiroll is a flexible execution system for trust-minimized and gas-efficient scripting on Ethereum. The DeployableVM contract provides a simple way to integrate Weiroll's powerful scripting capabilities into your smart contracts via delegatecall.
 
-Get your documentation site running locally and make your first customization.
+## Installation
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Install Weiroll using Foundry">
+    Add Weiroll to your Foundry project:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+    ```bash
+    forge install cowprotocol/weiroll
+    ```
+
+    <Note>
+      Make sure you have Foundry installed. If not, visit [getfoundry.sh](https://getfoundry.sh) to install it.
+    </Note>
+  </Step>
+
+  <Step title="Update your foundry.toml">
+    Add the Weiroll library to your `foundry.toml`:
+
+    ```toml
+    [profile.default]
+    src = "src"
+    out = "out"
+    libs = ["lib"]
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    # Recommended compiler settings
+    via_ir = true
+    optimizer = true
+    optimizer_runs = 1000000
+    solc = "0.8.27"
+    ```
+  </Step>
+</Steps>
+
+## Basic Usage
+
+The DeployableVM is designed to be called exclusively via `delegatecall` from your contract. This ensures that the Weiroll VM executes in your contract's context with access to your contract's storage and state.
+
+### Import the Contract
+
+```solidity
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+```
+
+### Execute Scripts via Delegatecall
+
+Here's a complete example showing how to integrate DeployableVM into your contract:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
+
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+
+contract MyContract {
+    DeployableVM public immutable weirollVM;
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    constructor(address _weirollVM) {
+        weirollVM = DeployableVM(_weirollVM);
+    }
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    function executeScript(
+        bytes32[] calldata commands,
+        bytes[] memory state
+    ) external payable returns (bytes[] memory) {
+        // Execute the Weiroll script via delegatecall
+        (bool success, bytes memory result) = address(weirollVM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        require(success, "Weiroll execution failed");
+        
+        return abi.decode(result, (bytes[]));
+    }
+}
+```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Warning>
+  The `execute` function will revert with `CallableOnlyViaDelegateCall()` if called directly. It must always be called via `delegatecall`.
+</Warning>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Complete Working Example
 
-### Step 3: Go live
+Here's a full example from the test suite showing proper usage:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+<CodeGroup>
 
-## Next steps
+```solidity Contract Implementation
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
 
-Now that you have your docs running, explore these key features:
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+
+contract WeirollExecutor {
+    DeployableVM public weirollVM;
+    
+    constructor() {
+        weirollVM = new DeployableVM();
+    }
+    
+    function runScript(
+        bytes32[] memory commands,
+        bytes[] memory state
+    ) public returns (bool) {
+        (bool success,) = address(weirollVM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        return success;
+    }
+}
+```
+
+```solidity Test Example
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
+
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract DeployableVMTest is Test {
+    DeployableVM public weiVm;
+
+    function setUp() public {
+        weiVm = new DeployableVM();
+    }
+
+    function test_callable_via_delegatecall() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+
+        (bool success,) = address(weiVm).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        assertTrue(success);
+    }
+
+    function test_reverts_if_not_delegatecall() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+
+        vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+        weiVm.execute(commands, state);
+    }
+}
+```
+
+</CodeGroup>
+
+## Deployment
+
+To deploy the DeployableVM contract with a deterministic address:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
+
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+import {Script} from "forge-std/Script.sol";
+
+contract DeployableVMScript is Script {
+    function run() public {
+        vm.startBroadcast();
+
+        // Deploy with deterministic salt for cross-chain consistency
+        DeployableVM weiVm = new DeployableVM{salt: ""}();
+
+        vm.stopBroadcast();
+    }
+}
+```
+
+Deploy using Foundry:
+
+```bash
+forge script script/DeployableVM.s.sol:DeployableVMScript \
+  --rpc-url $ETH_RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
+```
+
+<Tip>
+  Using a deterministic salt (empty string or fixed bytes32) ensures the contract deploys to the same address across different chains, making your integration more portable.
+</Tip>
+
+## Key Concepts
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Delegatecall Only" icon="shield-halved">
+    DeployableVM must be called via `delegatecall` to execute in your contract's context. Direct calls will revert.
+  </Card>
+  
+  <Card title="Commands & State" icon="code">
+    Weiroll scripts consist of `commands` (encoded operations) and `state` (data arrays) that define the execution flow.
+  </Card>
+  
+  <Card title="Gas Efficient" icon="gauge-high">
+    Optimized with `via_ir` and high optimizer runs (1,000,000) for maximum gas efficiency.
+  </Card>
+  
+  <Card title="Deterministic Deployment" icon="globe">
+    Use CREATE2 with fixed salts to deploy to the same address on multiple chains.
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Understanding Weiroll" href="/concepts/understanding-weiroll" icon="book">
+    Learn about Weiroll's architecture and command model
+  </Card>
+  
+  <Card title="API Reference" href="/api/deployable-vm" icon="code">
+    Detailed documentation of all DeployableVM functions and errors
+  </Card>
+  
+  <Card title="Examples" href="/resources/examples" icon="lightbulb">
+    Explore real-world use cases and advanced patterns
+  </Card>
+  
+  <Card title="GitHub Repository" href="https://github.com/cowprotocol/weiroll" icon="github">
+    View the source code and contribute
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### CallableOnlyViaDelegateCall Error
+
+If you encounter this error, ensure you're calling the `execute` function via `delegatecall`:
+
+```solidity
+// ✅ Correct
+(bool success,) = address(weirollVM).delegatecall(
+    abi.encodeCall(DeployableVM.execute, (commands, state))
+);
+
+// ❌ Wrong - will revert
+weirollVM.execute(commands, state);
+```
+
+### Deployment Address Mismatch
+
+If deploying on older Foundry versions, you may need to use a specific toolchain version:
+
+```bash
+foundryup -C cb9dfae298fe0b5a5cdef2536955f50b8c7f0bf5
+```
+
+This ensures deterministic deployment addresses match across environments.

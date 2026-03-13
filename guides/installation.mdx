@@ -1,0 +1,144 @@
+---
+title: Installation
+description: Set up Weiroll in your Foundry project
+---
+
+This guide walks you through installing Weiroll and its dependencies in your Foundry project.
+
+## Prerequisites
+
+<Warning>
+  Weiroll requires a specific Foundry toolchain version to ensure deterministic deployments work correctly. Using different versions may result in different deployment addresses.
+</Warning>
+
+### Install Foundry Toolchain
+
+Install the required Foundry version using the specific commit hash:
+
+```bash
+foundryup -C cb9dfae298fe0b5a5cdef2536955f50b8c7f0bf5
+```
+
+<Note>
+  This specific version is required because the deterministic deployment generates different addresses on newer Foundry versions.
+</Note>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Install Weiroll as a dependency">
+    Add Weiroll to your Foundry project using `forge install`:
+
+    ```bash
+    forge install weiroll/weiroll
+    ```
+
+    This will install the Weiroll library in your `lib/` directory.
+  </Step>
+
+  <Step title="Install required dependencies">
+    Weiroll depends on Enso Finance's fork of weiroll and forge-std. Install them:
+
+    ```bash
+    forge install enso-finance/enso-weiroll
+    forge install foundry-rs/forge-std
+    ```
+  </Step>
+
+  <Step title="Configure Foundry settings">
+    Update your `foundry.toml` to match the recommended compiler settings for optimal gas efficiency:
+
+    ```toml
+    [profile.default]
+    src = "src"
+    out = "out"
+    libs = ["lib"]
+
+    # Compiler settings
+    via_ir = true
+    optimizer = true
+    optimizer_runs = 1000000
+    solc = "0.8.27"
+
+    [fmt]
+    sort_imports = true
+    ```
+
+    <Info>
+      The `via_ir` flag enables the IR-based code generator, and `optimizer_runs` is set to 1000000 for maximum gas optimization in production deployments.
+    </Info>
+  </Step>
+
+  <Step title="Build the project">
+    Compile your contracts to verify the installation:
+
+    ```bash
+    forge build
+    ```
+
+    If successful, you should see output indicating that compilation completed without errors.
+  </Step>
+
+  <Step title="Run tests">
+    Verify everything is working correctly by running the test suite:
+
+    ```bash
+    forge test
+    ```
+  </Step>
+</Steps>
+
+## Verify Installation
+
+Create a simple test contract to verify Weiroll is properly installed:
+
+```solidity test/WeirollTest.sol
+// SPDX-License-Identifier: LGPL-3.0-or-later
+pragma solidity ^0.8.13;
+
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract WeirollTest is Test {
+    DeployableVM public weiVm;
+
+    function setUp() public {
+        weiVm = new DeployableVM();
+    }
+
+    function test_deployment() public {
+        assertTrue(address(weiVm) != address(0));
+    }
+}
+```
+
+Run the test:
+
+```bash
+forge test --match-contract WeirollTest
+```
+
+## Next Steps
+
+<Tip>
+  Now that you have Weiroll installed, learn how to integrate it into your contracts in the [Integration Guide](/guides/integration).
+</Tip>
+
+## Troubleshooting
+
+### Compilation Errors
+
+If you encounter compilation errors, ensure:
+- You're using the correct Foundry version (`cb9dfae298fe0b5a5cdef2536955f50b8c7f0bf5`)
+- All dependencies are properly installed in `lib/`
+- Your `foundry.toml` matches the recommended settings
+
+### Dependency Issues
+
+If dependencies aren't resolving correctly, try:
+
+```bash
+forge update
+```
+
+This will update all dependencies to their latest compatible versions.

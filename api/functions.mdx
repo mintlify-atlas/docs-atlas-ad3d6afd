@@ -1,0 +1,156 @@
+---
+title: 'Functions'
+description: 'API reference for DeployableVM functions'
+---
+
+## execute
+
+Executes a Weiroll script defined by a series of commands and state.
+
+### Signature
+
+```solidity
+function execute(
+    bytes32[] calldata commands,
+    bytes[] memory state
+) public payable returns (bytes[] memory)
+```
+
+### Parameters
+
+<ParamField path="commands" type="bytes32[] calldata" required>
+  An array of encoded Weiroll commands to execute. Each `bytes32` represents a single command in the Weiroll VM instruction format.
+  
+  Commands encode:
+  - Target contract address
+  - Function selector
+  - Input/output flags
+  - Call type (call, delegatecall, staticcall)
+</ParamField>
+
+<ParamField path="state" type="bytes[] memory" required>
+  The initial state array for the VM execution. This contains:
+  - Input parameters for commands
+  - Placeholder slots for intermediate results
+  - Return values that accumulate during execution
+  
+  The state is modified in-place as commands execute and is returned with all results.
+</ParamField>
+
+### Returns
+
+<ResponseField name="state" type="bytes[] memory">
+  The modified state array after all commands have executed. Contains:
+  - All original inputs
+  - Results from each command execution
+  - Final return values from the script
+</ResponseField>
+
+### Modifiers
+
+- `public` - Can be called externally
+- `payable` - Can receive ETH during execution
+
+### Behavior
+
+1. **Delegatecall Check**: Verifies that the function is being called via delegatecall by checking if `address(this) != WEIROLL_SINGLETON`
+2. **Execution**: If the check passes, delegates to the internal `_execute()` function from the WeirollVM base contract
+3. **Revert**: If called directly (not via delegatecall), reverts with `CallableOnlyViaDelegateCall()` error
+
+### Usage Examples
+
+#### Basic Execution via Delegatecall
+
+```solidity
+contract MyContract {
+    DeployableVM public weirollVM;
+    
+    constructor(address _weirollVM) {
+        weirollVM = DeployableVM(_weirollVM);
+    }
+    
+    function executeScript(
+        bytes32[] calldata commands,
+        bytes[] memory state
+    ) external payable returns (bytes[] memory) {
+        // Execute Weiroll script via delegatecall
+        (bool success, bytes memory result) = address(weirollVM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        require(success, "Weiroll execution failed");
+        return abi.decode(result, (bytes[]));
+    }
+}
+```
+
+#### Empty Script Execution (Test Example)
+
+```solidity
+// From the test suite
+function test_callable_via_delegatecall() public {
+    bytes32[] memory commands = new bytes32[](0);
+    bytes[] memory state = new bytes[](0);
+    
+    (bool success,) = address(weiVm).delegatecall(
+        abi.encodeCall(DeployableVM.execute, (commands, state))
+    );
+    
+    assertTrue(success);
+}
+```
+
+#### Direct Call (Will Revert)
+
+```solidity
+// From the test suite - demonstrates the error case
+function test_reverts_if_not_delegatecall() public {
+    bytes32[] memory commands = new bytes32[](0);
+    bytes[] memory state = new bytes[](0);
+    
+    vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+    weiVm.execute(commands, state); // ❌ Direct call - will revert
+}
+```
+
+### Error Conditions
+
+<Warning>
+  **CallableOnlyViaDelegateCall()**: Thrown when `execute()` is called directly instead of via delegatecall. This is a security measure to ensure the VM operates within the correct execution context.
+</Warning>
+
+### Security Considerations
+
+<Note>
+  The `execute()` function is `payable`, allowing ETH to be sent during Weiroll script execution. This enables scripts to interact with contracts that require ETH payments.
+</Note>
+
+<Note>
+  The delegatecall-only restriction ensures that:
+  - The VM executes in the caller's context
+  - Storage modifications affect the calling contract
+  - The VM cannot be misused as a standalone contract
+</Note>
+
+### Technical Details
+
+#### Why Delegatecall?
+
+The Weiroll VM is designed to execute in the context of the calling contract:
+- Commands can modify the caller's storage
+- Commands can access the caller's balance
+- Commands execute with the caller's `msg.sender` context
+
+Direct calls would execute in the VM's context, which is not the intended behavior.
+
+#### EIP-6780 Context
+
+The check against direct calls was historically important to prevent `SELFDESTRUCT` attacks. With EIP-6780 (implemented in recent Ethereum upgrades), `SELFDESTRUCT` no longer destroys contract code, but the check remains for:
+- Defense in depth
+- Compatibility with chains not supporting EIP-6780
+- Clear enforcement of intended usage patterns
+
+## Related Documentation
+
+- [DeployableVM Contract](/api/deployable-vm)
+- [Error Reference](/api/errors)

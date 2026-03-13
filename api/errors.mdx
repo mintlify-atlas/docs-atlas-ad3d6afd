@@ -1,0 +1,154 @@
+---
+title: 'Errors'
+description: 'API reference for DeployableVM custom errors'
+---
+
+## CallableOnlyViaDelegateCall
+
+Custom error thrown when the `execute()` function is called directly instead of via delegatecall.
+
+### Definition
+
+```solidity
+error CallableOnlyViaDelegateCall();
+```
+
+### Description
+
+This error enforces that the DeployableVM's `execute()` function must only be invoked through a delegatecall. The error takes no parameters and is thrown when the contract detects it's being called in its original deployment context rather than in a delegated context.
+
+### When It's Thrown
+
+The error is thrown in the `execute()` function when:
+
+```solidity
+require(address(this) != WEIROLL_SINGLETON, CallableOnlyViaDelegateCall());
+```
+
+**Condition**: `address(this) == WEIROLL_SINGLETON`
+
+This check compares the current execution context address with the immutable singleton address set during contract deployment:
+
+- **Direct call**: `address(this)` equals `WEIROLL_SINGLETON` → Error thrown
+- **Delegatecall**: `address(this)` is the caller's address → Check passes
+
+### Why This Error Exists
+
+<Note>
+  The Weiroll VM is designed to execute scripts in the context of a calling contract via delegatecall. This allows the VM to:
+  - Modify the caller's storage
+  - Execute with the caller's balance and permissions
+  - Maintain proper `msg.sender` context
+  
+  Direct calls would execute in the VM's own context, which is not the intended usage pattern and could lead to unexpected behavior.
+</Note>
+
+### Usage Example
+
+#### Triggering the Error (Incorrect Usage)
+
+```solidity
+contract Example {
+    DeployableVM public weirollVM;
+    
+    function incorrectUsage() external {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        // ❌ Direct call - will revert with CallableOnlyViaDelegateCall()
+        weirollVM.execute(commands, state);
+    }
+}
+```
+
+#### Avoiding the Error (Correct Usage)
+
+```solidity
+contract Example {
+    DeployableVM public weirollVM;
+    
+    function correctUsage() external returns (bytes[] memory) {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        // ✅ Delegatecall - executes successfully
+        (bool success, bytes memory result) = address(weirollVM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        require(success, "Execution failed");
+        return abi.decode(result, (bytes[]));
+    }
+}
+```
+
+#### Test Case Example
+
+From the test suite:
+
+```solidity
+function test_reverts_if_not_delegatecall() public {
+    bytes32[] memory commands = new bytes32[](0);
+    bytes[] memory state = new bytes[](0);
+    
+    // Expect the error to be thrown
+    vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+    weiVm.execute(commands, state);
+}
+```
+
+### Error Selector
+
+The error selector for catching this error in tests or error handling:
+
+```solidity
+bytes4 selector = DeployableVM.CallableOnlyViaDelegateCall.selector;
+```
+
+### Handling the Error
+
+<Warning>
+  This error indicates a fundamental misuse of the DeployableVM contract. If you encounter this error:
+  
+  1. **Check your call pattern**: Ensure you're using `delegatecall` instead of a regular call
+  2. **Review your architecture**: The VM should be deployed once and called via delegatecall from other contracts
+  3. **Verify context**: Make sure the calling contract has the appropriate setup for delegatecall execution
+</Warning>
+
+### Technical Implementation
+
+The check uses an immutable variable pattern:
+
+```solidity
+address private immutable WEIROLL_SINGLETON;
+
+constructor() {
+    WEIROLL_SINGLETON = address(this);
+}
+
+function execute(bytes32[] calldata commands, bytes[] memory state) 
+    public payable returns (bytes[] memory) 
+{
+    require(address(this) != WEIROLL_SINGLETON, CallableOnlyViaDelegateCall());
+    return _execute(commands, state);
+}
+```
+
+**How it works:**
+- During deployment, `WEIROLL_SINGLETON` is set to the deployed contract address
+- On direct call: `address(this)` equals `WEIROLL_SINGLETON` (same address)
+- On delegatecall: `address(this)` equals the caller's address (different from `WEIROLL_SINGLETON`)
+
+### Security Context
+
+<Note>
+  With the implementation of EIP-6780, the contract no longer needs to guard against `SELFDESTRUCT` attacks. However, this check is maintained as:
+  - An abundance of caution
+  - Compatibility with chains that may not support EIP-6780
+  - Clear enforcement of the correct usage pattern
+</Note>
+
+## Related Documentation
+
+- [DeployableVM Contract](/api/deployable-vm)
+- [execute() Function](/api/functions#execute)

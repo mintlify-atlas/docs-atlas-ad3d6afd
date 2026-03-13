@@ -1,0 +1,353 @@
+---
+title: "Migration Guide"
+description: "Guide for migrating to CoW Protocol's DeployableVM from other Weiroll implementations"
+---
+
+## Overview
+
+This guide helps you migrate to the CoW Protocol DeployableVM from:
+- [Original Weiroll](https://github.com/weiroll/weiroll)
+- [Enso Finance's Weiroll fork](https://github.com/enso-finance/enso-weiroll)
+
+<Info>
+  The DeployableVM builds on Enso Finance's audited implementation with a focus on deployability and multi-chain support.
+</Info>
+
+## Key Differences
+
+### Architecture Overview
+
+<Accordion title="Original Weiroll">
+  The original Weiroll project provides the VM implementation and TypeScript/JavaScript SDKs for command construction. It's designed as a library to be integrated into your contracts.
+</Accordion>
+
+<Accordion title="Enso Finance's Fork">
+  Enso Finance's fork includes security audits and optimizations. It maintains the core VM functionality while adding production-ready safety features.
+</Accordion>
+
+<Accordion title="CoW Protocol's DeployableVM">
+  The DeployableVM wraps Enso Finance's VM with:
+  - Delegatecall-only execution guard
+  - Deterministic deployment across chains
+  - Ready-to-use singleton pattern
+  - Multi-chain deployment addresses
+</Accordion>
+
+## Migration from Original Weiroll
+
+### What's Different
+
+#### 1. Delegatecall-Only Execution
+
+The most significant change is that DeployableVM **only** accepts delegatecalls:
+
+```solidity
+// ❌ Original Weiroll - allowed direct calls
+weirollVM.execute(commands, state);
+
+// ✅ DeployableVM - requires delegatecall
+(bool success,) = address(weirollVM).delegatecall(
+    abi.encodeCall(DeployableVM.execute, (commands, state))
+);
+require(success);
+```
+
+<Warning>
+  Direct calls to `execute()` will revert with `CallableOnlyViaDelegateCall()` error.
+</Warning>
+
+#### 2. Deployment Strategy
+
+Original Weiroll was meant to be embedded in your contracts. DeployableVM uses a singleton pattern:
+
+```solidity
+// ❌ Original approach - embed VM in your contract
+contract MyContract is WeirollVM {
+    function myFunction() external {
+        _execute(commands, state);
+    }
+}
+
+// ✅ DeployableVM approach - use via delegatecall
+contract MyContract {
+    DeployableVM immutable weirollVM;
+    
+    constructor(address _weirollVM) {
+        weirollVM = DeployableVM(_weirollVM);
+    }
+    
+    function myFunction() external {
+        (bool success,) = address(weirollVM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        require(success);
+    }
+}
+```
+
+#### 3. Command Construction
+
+Command construction remains compatible - you can use the same Weiroll SDKs:
+
+```javascript
+// JavaScript/TypeScript SDK usage is identical
+import { Planner } from '@weiroll/weiroll.js';
+
+const planner = new Planner();
+// Build your commands as before
+const { commands, state } = planner.plan();
+```
+
+### Migration Steps
+
+1. **Update Contract Architecture**
+   - Remove VM inheritance from your contracts
+   - Add DeployableVM address as constructor parameter
+   - Replace direct `_execute()` calls with delegatecalls
+
+2. **Update Execution Pattern**
+   ```solidity
+   // Before
+   bytes[] memory result = _execute(commands, state);
+   
+   // After
+   (bool success, bytes memory data) = address(weirollVM).delegatecall(
+       abi.encodeCall(DeployableVM.execute, (commands, state))
+   );
+   require(success, "Execution failed");
+   bytes[] memory result = abi.decode(data, (bytes[]));
+   ```
+
+3. **Use Deployed Addresses**
+   - Reference the [deployment addresses](/resources/deployment-addresses)
+   - No need to deploy your own VM instance
+
+## Migration from Enso Finance's Fork
+
+### What's Different
+
+If you're using Enso Finance's fork directly, the migration is simpler:
+
+#### Core VM is Identical
+
+DeployableVM wraps Enso's VM without modifying its core functionality:
+
+```solidity
+// DeployableVM.sol
+import {VM as WeirollVM} from "lib/enso-weiroll/contracts/VM.sol";
+
+contract DeployableVM is WeirollVM {
+    // Adds delegatecall guard only
+    function execute(bytes32[] calldata commands, bytes[] memory state) 
+        public 
+        payable 
+        returns (bytes[] memory) 
+    {
+        require(address(this) != WEIROLL_SINGLETON, CallableOnlyViaDelegateCall());
+        return _execute(commands, state);
+    }
+}
+```
+
+#### Changes Required
+
+1. **Add Delegatecall Guard**
+   - Update all direct calls to use delegatecall
+   - Handle delegatecall return values
+
+2. **Consider Using Singleton**
+   - Use deployed DeployableVM addresses instead of deploying your own
+   - Saves deployment gas costs
+   - Ensures consistent addresses across chains
+
+### Migration Steps
+
+1. **Identify Current Usage**
+   ```solidity
+   // Current Enso Finance VM usage
+   import {VM} from "enso-weiroll/contracts/VM.sol";
+   
+   contract MyContract is VM {
+       function executeScript(bytes32[] calldata commands, bytes[] memory state) 
+           external 
+           returns (bytes[] memory) 
+       {
+           return _execute(commands, state);
+       }
+   }
+   ```
+
+2. **Update to DeployableVM**
+   ```solidity
+   import {DeployableVM} from "./DeployableVM.sol";
+   
+   contract MyContract {
+       DeployableVM immutable weirollVM;
+       
+       constructor(address _weirollVM) {
+           weirollVM = DeployableVM(_weirollVM);
+       }
+       
+       function executeScript(bytes32[] calldata commands, bytes[] memory state) 
+           external 
+           returns (bytes[] memory) 
+       {
+           (bool success, bytes memory data) = address(weirollVM).delegatecall(
+               abi.encodeCall(DeployableVM.execute, (commands, state))
+           );
+           require(success, "Execution failed");
+           return abi.decode(data, (bytes[]));
+       }
+   }
+   ```
+
+## EIP-6780 Considerations
+
+DeployableVM includes protection against SELFDESTRUCT attacks, even on chains without EIP-6780:
+
+```solidity
+// From DeployableVM.sol
+require(address(this) != WEIROLL_SINGLETON, CallableOnlyViaDelegateCall());
+```
+
+<Info>
+  This check prevents the singleton from being called directly, protecting against potential SELFDESTRUCT attacks on pre-EIP-6780 chains.
+</Info>
+
+## Testing Your Migration
+
+Ensure your migration is successful with comprehensive tests:
+
+```solidity
+import {Test} from "forge-std/Test.sol";
+import {DeployableVM} from "./DeployableVM.sol";
+
+contract MigrationTest is Test {
+    DeployableVM weirollVM;
+    MyContract myContract;
+    
+    function setUp() public {
+        weirollVM = new DeployableVM();
+        myContract = new MyContract(address(weirollVM));
+    }
+    
+    function test_delegatecall_requirement() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        // Verify delegatecall works
+        myContract.executeScript(commands, state);
+        
+        // Verify direct calls fail
+        vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+        weirollVM.execute(commands, state);
+    }
+}
+```
+
+## Deployment
+
+### Using Pre-deployed Instances
+
+The recommended approach is using the deployed DeployableVM addresses:
+
+```solidity
+contract MyContract {
+    // Ethereum Mainnet address
+    DeployableVM constant WEIROLL_VM = 
+        DeployableVM(0x9585c3062Df1C247d5E373Cfca9167F7dC2b5963);
+    
+    function executeScript(
+        bytes32[] calldata commands,
+        bytes[] memory state
+    ) external returns (bytes[] memory) {
+        (bool success, bytes memory data) = address(WEIROLL_VM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        require(success);
+        return abi.decode(data, (bytes[]));
+    }
+}
+```
+
+See [Deployment Addresses](/resources/deployment-addresses) for all supported networks.
+
+### Deploying Your Own Instance
+
+If you need to deploy your own instance:
+
+```bash
+# Clone the repository
+git clone https://github.com/cowprotocol/weiroll
+
+# Install dependencies
+forge install
+
+# Deploy with deterministic address
+forge script 'script/DeployableVM.s.sol:DeployableVMScript' \
+  --rpc-url "$ETH_RPC_URL" \
+  --private-key "$PK" \
+  --verify --broadcast
+```
+
+<Warning>
+  Ensure you're using Foundry toolchain version `cb9dfae298fe0b5a5cdef2536955f50b8c7f0bf5` for deterministic deployments.
+</Warning>
+
+## Compatibility Matrix
+
+| Feature | Original Weiroll | Enso Finance | DeployableVM |
+|---------|-----------------|--------------|---------------|
+| Core VM | ✓ | ✓ (Enhanced) | ✓ (Enso-based) |
+| Security Audits | - | ✓ | ✓ (Inherits) |
+| Delegatecall Guard | - | - | ✓ |
+| Multi-chain Deployments | - | - | ✓ |
+| Deterministic Addresses | - | - | ✓ |
+| Command Encoding | ✓ | ✓ | ✓ |
+| JavaScript SDK | ✓ | ✓ | ✓ |
+
+## Common Migration Issues
+
+<Accordion title="Error: CallableOnlyViaDelegateCall">
+  **Cause:** You're calling `execute()` directly instead of via delegatecall.
+  
+  **Solution:** Update your calls to use delegatecall pattern:
+  ```solidity
+  (bool success,) = address(weirollVM).delegatecall(
+      abi.encodeCall(DeployableVM.execute, (commands, state))
+  );
+  ```
+</Accordion>
+
+<Accordion title="Storage Conflicts">
+  **Cause:** Delegatecall executes in your contract's context, potentially conflicting with storage layout.
+  
+  **Solution:** Ensure your contract's storage layout doesn't conflict with Weiroll's state array indices. Use separate storage slots or namespaced storage patterns.
+</Accordion>
+
+<Accordion title="Return Value Decoding">
+  **Cause:** Delegatecall returns raw bytes that need decoding.
+  
+  **Solution:** Decode the return data:
+  ```solidity
+  (bool success, bytes memory data) = address(weirollVM).delegatecall(...);
+  require(success);
+  bytes[] memory results = abi.decode(data, (bytes[]));
+  ```
+</Accordion>
+
+## Additional Resources
+
+- [Original Weiroll Documentation](https://github.com/weiroll/weiroll)
+- [Enso Finance Weiroll Fork](https://github.com/enso-finance/enso-weiroll)
+- [CoW Protocol DeployableVM Repository](https://github.com/cowprotocol/weiroll)
+- [Deployment Addresses](/resources/deployment-addresses)
+- [Examples](/resources/examples)
+
+## Getting Help
+
+If you encounter issues during migration:
+
+1. Check the [examples](/resources/examples) for working code patterns
+2. Review the [API reference](/api/deployable-vm)
+3. Open an issue on [GitHub](https://github.com/cowprotocol/weiroll/issues)

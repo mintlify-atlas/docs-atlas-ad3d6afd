@@ -1,0 +1,75 @@
+---
+title: Introduction
+description: A deployable, self-contained instance of Weiroll for trust-minimized and gas-efficient on-chain scripting
+---
+
+# Welcome to Weiroll
+
+Weiroll is a flexible execution system designed to enable trust-minimized and gas-efficient scripting on Ethereum and other EVM-compatible chains. This repository builds upon the original concept of weiroll with a simple self-contained deployment.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with Weiroll in minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/understanding-weiroll">
+    Learn about Weiroll's architecture and design
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/deployable-vm">
+    Explore the DeployableVM contract
+  </Card>
+  <Card title="Deployment Addresses" icon="globe" href="/resources/deployment-addresses">
+    Find Weiroll deployments across chains
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Deterministic Deployment" icon="fingerprint">
+    Deploy to the same address across multiple EVM chains using CREATE2
+  </Card>
+  <Card title="Enhanced Security" icon="shield">
+    Delegate-call only execution prevents direct calls to the singleton
+  </Card>
+  <Card title="Gas Efficient" icon="bolt">
+    Optimized on-chain scripting with minimal overhead
+  </Card>
+  <Card title="Multi-Chain Support" icon="network-wired">
+    Available on Ethereum, Optimism, Arbitrum, Base, Polygon, and more
+  </Card>
+</CardGroup>
+
+## What is Weiroll?
+
+Weiroll provides a runtime scripting engine for Ethereum smart contracts. Instead of hardcoding complex logic into your contracts, you can define execution plans as sequences of commands that are executed by the Weiroll VM.
+
+The `DeployableVM` contract in this repository wraps the Enso Finance audited Weiroll VM implementation, making it available as a singleton that can be used via `delegatecall` from any contract.
+
+<Info>
+This implementation builds on the pioneering work of the [original Weiroll project](https://github.com/weiroll/weiroll) and the innovative [Enso Finance fork](https://github.com/enso-finance/enso-weiroll).
+</Info>
+
+## Use Cases
+
+Weiroll is ideal for scenarios where you need flexible, composable on-chain logic:
+
+- **DeFi protocols** that need to execute complex multi-step operations
+- **Account abstraction** implementations requiring flexible execution logic
+- **DAO governance** systems with dynamic proposal execution
+- **Cross-chain bridges** and protocols requiring complex state transitions
+
+## Getting Started
+
+<Steps>
+  <Step title="Install Foundry">
+    Ensure you have the correct Foundry version installed for deterministic deployments
+  </Step>
+  <Step title="Add to your project">
+    Install Weiroll as a dependency in your Solidity project
+  </Step>
+  <Step title="Integrate the VM">
+    Use `delegatecall` to execute Weiroll commands from your contracts
+  </Step>
+</Steps>
+
+Ready to get started? Check out the [Quickstart Guide](/quickstart) to begin using Weiroll in your project.

@@ -1,0 +1,222 @@
+---
+title: "Examples"
+description: "Practical examples for using Weiroll's DeployableVM for on-chain scripting"
+---
+
+## Overview
+
+This page provides practical examples of using the DeployableVM contract for on-chain scripting. The DeployableVM allows contracts to execute complex sequences of operations in a gas-efficient manner using delegatecall.
+
+<Note>
+  The DeployableVM can **only** be called via delegatecall for security reasons. Direct calls will revert.
+</Note>
+
+## Basic Usage Pattern
+
+The core pattern for using DeployableVM involves:
+1. Constructing a sequence of commands (as `bytes32[]`)
+2. Preparing the state array (as `bytes[]`)
+3. Calling the VM via delegatecall from your contract
+
+### Delegatecall Requirement
+
+<Warning>
+  The DeployableVM contract **must** be called via delegatecall. Direct calls will revert with `CallableOnlyViaDelegateCall` error.
+</Warning>
+
+```solidity
+// ❌ This will FAIL - direct call not allowed
+weiVm.execute(commands, state);
+
+// ✅ This will SUCCEED - delegatecall is required
+(bool success, bytes memory result) = address(weiVm).delegatecall(
+    abi.encodeCall(DeployableVM.execute, (commands, state))
+);
+require(success, "Execution failed");
+```
+
+## Example 1: Empty Execution
+
+The simplest example demonstrates calling the VM with no commands:
+
+```solidity
+contract MyContract {
+    DeployableVM public immutable weiVm;
+    
+    constructor(address _weiVm) {
+        weiVm = DeployableVM(_weiVm);
+    }
+    
+    function executeEmpty() external {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        (bool success,) = address(weiVm).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        require(success, "Execution failed");
+    }
+}
+```
+
+## Example 2: Testing Delegatecall Safety
+
+This example from the test suite shows how to verify the delegatecall-only restriction:
+
+```solidity
+import {DeployableVM} from "./DeployableVM.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract DeployableVMTest is Test {
+    DeployableVM public weiVm;
+
+    function setUp() public {
+        weiVm = new DeployableVM();
+    }
+
+    function test_reverts_if_not_delegatecall() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+
+        // This will revert with CallableOnlyViaDelegateCall
+        vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+        weiVm.execute(commands, state);
+    }
+
+    function test_callable_via_delegatecall() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+
+        // This will succeed
+        (bool success,) = address(weiVm).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        assertTrue(success);
+    }
+}
+```
+
+## Example 3: Building a Script Executor Contract
+
+Here's a complete example of a contract that uses DeployableVM:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.27;
+
+import {DeployableVM} from "./DeployableVM.sol";
+
+contract ScriptExecutor {
+    DeployableVM public immutable weirollVM;
+    
+    event ScriptExecuted(bytes32[] commands, bytes[] state);
+    
+    constructor(address _weirollVM) {
+        weirollVM = DeployableVM(_weirollVM);
+    }
+    
+    function executeScript(
+        bytes32[] calldata commands,
+        bytes[] memory state
+    ) external returns (bytes[] memory) {
+        // Execute via delegatecall
+        (bool success, bytes memory result) = address(weirollVM).delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        require(success, "Script execution failed");
+        
+        // Decode the result
+        bytes[] memory returnData = abi.decode(result, (bytes[]));
+        
+        emit ScriptExecuted(commands, state);
+        
+        return returnData;
+    }
+}
+```
+
+## Command Construction
+
+Weiroll uses a compact command format encoded as `bytes32`. Each command contains:
+- Target contract address
+- Function selector
+- Input/output flags
+- Return value handling
+
+<Info>
+  For detailed information on command encoding and the Weiroll VM specification, refer to the [original Weiroll documentation](https://github.com/weiroll/weiroll) and [Enso Finance's fork](https://github.com/enso-finance/enso-weiroll).
+</Info>
+
+## Deployment Addresses
+
+DeployableVM is deployed on multiple networks. See the [Deployment Addresses](/resources/deployment-addresses) page for the full list.
+
+### Using Deployed Instances
+
+```solidity
+// Ethereum Mainnet
+DeployableVM weirollVM = DeployableVM(0x9585c3062Df1C247d5E373Cfca9167F7dC2b5963);
+
+// Use in your contract via delegatecall
+(bool success,) = address(weirollVM).delegatecall(
+    abi.encodeCall(DeployableVM.execute, (commands, state))
+);
+```
+
+## Security Considerations
+
+<Warning>
+  When using delegatecall, the VM executes in your contract's context. Ensure you:
+  - Trust the DeployableVM implementation
+  - Validate all commands and state before execution
+  - Understand that the VM has access to your contract's storage
+  - Be aware of the implications of EIP-6780 regarding SELFDESTRUCT
+</Warning>
+
+### EIP-6780 Compatibility
+
+The DeployableVM includes a guard against SELFDESTRUCT attacks, even though EIP-6780 has significantly reduced this risk:
+
+```solidity
+// From DeployableVM.sol:26
+require(address(this) != WEIROLL_SINGLETON, CallableOnlyViaDelegateCall());
+```
+
+This check ensures the contract cannot be called directly, even on chains that don't support EIP-6780.
+
+## Testing Your Integration
+
+When testing contracts that use DeployableVM:
+
+```solidity
+import {Test} from "forge-std/Test.sol";
+import {DeployableVM} from "./DeployableVM.sol";
+
+contract MyContractTest is Test {
+    DeployableVM weirollVM;
+    MyContract myContract;
+    
+    function setUp() public {
+        // Deploy VM in test environment
+        weirollVM = new DeployableVM();
+        
+        // Pass VM address to your contract
+        myContract = new MyContract(address(weirollVM));
+    }
+    
+    function test_execution() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        // Test your contract's integration
+        myContract.executeScript(commands, state);
+    }
+}
+```
+
+## Next Steps
+
+- Learn about [migrating from other Weiroll versions](/resources/migration-guide)
+- View all [deployment addresses](/resources/deployment-addresses)
+- Check the [API Reference](/api/deployable-vm) for detailed contract documentation

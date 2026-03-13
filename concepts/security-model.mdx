@@ -1,0 +1,254 @@
+---
+title: Security Model
+description: Understand Weiroll's security guarantees and design decisions
+---
+
+# Security Model
+
+Weiroll's security model is built around a simple principle: **delegate-call only execution**. This design ensures that scripts execute in the caller's context while preventing direct execution on the singleton VM contract.
+
+## Delegate-Call Only Design
+
+The DeployableVM contract is designed to be called **exclusively via delegatecall**. This is a fundamental security feature that ensures:
+
+- Scripts execute in the context of the calling contract
+- The VM singleton's state remains immutable
+- Each caller maintains isolated execution environments
+
+<Warning>
+**Critical Security Requirement**: The DeployableVM must never be called directly. Always use delegatecall when invoking the execute function.
+</Warning>
+
+### How It Works
+
+When a contract delegates to the DeployableVM:
+
+```solidity
+(bool success,) = address(weiVm).delegatecall(
+    abi.encodeCall(DeployableVM.execute, (commands, state))
+);
+```
+
+The VM's code executes with:
+- The caller's storage
+- The caller's balance
+- The caller's address context
+
+<Info>
+This is why Weiroll scripts have full access to your contract's capabilities - they literally run as your contract.
+</Info>
+
+## The WEIROLL_SINGLETON Check
+
+The core security mechanism is the `WEIROLL_SINGLETON` check implemented in the execute function:
+
+```solidity
+address private immutable WEIROLL_SINGLETON;
+
+constructor() {
+    WEIROLL_SINGLETON = address(this);
+}
+
+function execute(
+    bytes32[] calldata commands,
+    bytes[] memory state
+) public payable returns (bytes[] memory) {
+    require(
+        address(this) != WEIROLL_SINGLETON,
+        CallableOnlyViaDelegateCall()
+    );
+    
+    return _execute(commands, state);
+}
+```
+
+### Understanding the Check
+
+This elegant check works because:
+
+1. **In the constructor**: `WEIROLL_SINGLETON = address(this)` stores the deployment address
+2. **On direct call**: `address(this)` equals `WEIROLL_SINGLETON` → execution reverts
+3. **On delegatecall**: `address(this)` is the caller's address, not the singleton → execution proceeds
+
+<CardGroup cols={2}>
+  <Card title="Direct Call" icon="xmark" color="#ef4444">
+    ```solidity
+    // This will revert
+    weiVm.execute(commands, state);
+    ```
+    `address(this)` == singleton address ❌
+  </Card>
+  <Card title="Delegatecall" icon="check" color="#22c55e">
+    ```solidity
+    // This will succeed
+    delegatecall(execute(commands, state));
+    ```
+    `address(this)` == caller address ✓
+  </Card>
+</CardGroup>
+
+## Why This Matters
+
+### Preventing State Corruption
+
+If the singleton could be called directly:
+
+- Malicious actors could potentially manipulate the VM's state
+- The singleton could accumulate tokens or ether
+- The VM could be "poisoned" affecting all users
+
+<Warning>
+Without the delegatecall-only restriction, a singleton VM would be a shared mutable resource - a significant security risk.
+</Warning>
+
+### Ensuring Isolated Execution
+
+By enforcing delegatecall:
+
+- Each contract maintains its own execution context
+- No shared state between different callers
+- Scripts cannot affect other users of the VM
+
+## EIP-6780 Considerations
+
+The code includes an important comment about [EIP-6780](https://eips.ethereum.org/EIPS/eip-6780):
+
+```solidity
+// With the event of EIP-6780, we no longer have to guard against `SELFDESTRUCT`,
+// but the following check is added out of an abundance of caution in the event
+// the contract is deployed on a chain that does not support EIP-6780.
+```
+
+### What is EIP-6780?
+
+EIP-6780 (implemented in the Cancun upgrade) changed the behavior of `SELFDESTRUCT`:
+
+- **Pre-EIP-6780**: `SELFDESTRUCT` could destroy a contract and send its ether
+- **Post-EIP-6780**: `SELFDESTRUCT` only sends ether; it no longer destroys the contract code
+
+### Why It's Relevant
+
+Before EIP-6780, a potential attack vector was:
+
+1. Call the VM singleton directly (if it were allowed)
+2. Execute a script that calls `SELFDESTRUCT`
+3. Destroy the singleton, breaking it for all users
+
+<Accordion title="Historical Context">
+The delegatecall-only check was originally essential to prevent SELFDESTRUCT attacks on the singleton. While EIP-6780 eliminates this specific concern on supporting chains, the check remains as a defense-in-depth measure.
+</Accordion>
+
+### Defense in Depth
+
+The DeployableVM maintains the check "out of an abundance of caution" because:
+
+- Some chains may not implement EIP-6780
+- The VM may be deployed to L2s with different rules
+- Defense-in-depth is a security best practice
+- The check prevents other potential singleton-state attacks
+
+<Tip>
+Even though EIP-6780 reduces one attack vector, the delegatecall-only design provides multiple security benefits beyond just SELFDESTRUCT protection.
+</Tip>
+
+## Security Best Practices
+
+### For Integrators
+
+When integrating Weiroll into your contracts:
+
+<CardGroup cols={1}>
+  <Card title="✓ Always Use Delegatecall" icon="shield-check">
+    Never call the VM directly. Always use delegatecall to execute scripts.
+  </Card>
+  
+  <Card title="✓ Validate Scripts" icon="magnifying-glass">
+    Only execute trusted scripts. Scripts have full access to your contract's state.
+  </Card>
+  
+  <Card title="✓ Access Control" icon="lock">
+    Implement proper access control on functions that execute Weiroll scripts.
+  </Card>
+  
+  <Card title="✓ Test Thoroughly" icon="flask">
+    Test scripts extensively off-chain before deploying to mainnet.
+  </Card>
+</CardGroup>
+
+### Script Trust Assumptions
+
+<Warning>
+**Critical**: A Weiroll script executed via delegatecall has complete access to:
+- All of your contract's storage
+- All of your contract's functions
+- Your contract's ether balance
+- The ability to make arbitrary calls as your contract
+
+Only execute scripts you completely trust.
+</Warning>
+
+### Recommended Security Model
+
+For production usage:
+
+1. **Governance-Controlled Scripts**: Store approved scripts on-chain, controllable only by governance
+2. **Script Whitelisting**: Maintain a registry of approved script hashes
+3. **Time-Locks**: Use time-locks before executing new scripts
+4. **Simulation**: Always simulate execution off-chain first
+5. **Audits**: Have custom scripts audited by security professionals
+
+<Note>
+The DeployableVM itself has been designed to be secure when used correctly. The primary security consideration is **which scripts you allow to execute** in your contract's context.
+</Note>
+
+## Audit Status
+
+The DeployableVM builds on Enso Finance's audited Weiroll VM implementation:
+
+- **Base VM**: Audited implementation from Enso Finance
+- **DeployableVM wrapper**: Adds delegatecall-only restriction
+- **Minimal attack surface**: Only 31 lines of Solidity code
+
+<Info>
+You can review the audited base VM at: [https://github.com/EnsoFinance/enso-weiroll](https://github.com/EnsoFinance/enso-weiroll)
+</Info>
+
+## Testing Security
+
+The test suite verifies the security model:
+
+```solidity
+function test_reverts_if_not_delegatecall() public {
+    bytes32[] memory commands = new bytes32[](0);
+    bytes[] memory state = new bytes[](0);
+    
+    vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+    weiVm.execute(commands, state);
+}
+
+function test_callable_via_delegatecall() public {
+    bytes32[] memory commands = new bytes32[](0);
+    bytes[] memory state = new bytes[](0);
+    
+    (bool success,) = address(weiVm).delegatecall(
+        abi.encodeCall(DeployableVM.execute, (commands, state))
+    );
+    assertTrue(success);
+}
+```
+
+These tests ensure:
+- Direct calls are rejected (line 14-19 in src/DeployableVM.t.sol:14-19)
+- Delegatecalls are accepted (line 22-28 in src/DeployableVM.t.sol:22-28)
+
+## Summary
+
+Weiroll's security model is straightforward but robust:
+
+✅ **Delegatecall-only execution** prevents singleton state attacks
+✅ **WEIROLL_SINGLETON check** enforces the execution model
+✅ **EIP-6780 awareness** provides defense-in-depth
+✅ **Minimal code** reduces attack surface
+✅ **Audited base** builds on proven implementation
+
+The key responsibility for integrators is to **only execute trusted scripts**, as scripts have full access to the calling contract's context.

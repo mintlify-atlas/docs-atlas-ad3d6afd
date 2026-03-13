@@ -1,0 +1,151 @@
+---
+title: Understanding Weiroll
+description: Learn how Weiroll enables trust-minimized and gas-efficient scripting on Ethereum
+---
+
+# Understanding Weiroll
+
+Weiroll is a flexible execution system designed to enable trust-minimized and gas-efficient scripting on Ethereum. It provides a virtual machine (VM) architecture that allows contracts to execute complex sequences of operations through a command-and-state model.
+
+## What is Weiroll?
+
+Weiroll is an on-chain scripting language and execution environment that allows you to:
+
+- **Execute sequences of contract calls** in a single transaction
+- **Minimize trust assumptions** through delegate-call execution
+- **Optimize gas usage** by batching operations efficiently
+- **Compose complex operations** from simple building blocks
+
+<Info>
+This implementation builds upon the original [weiroll project](https://github.com/weiroll/weiroll) and incorporates improvements from [Enso Finance's audited fork](https://github.com/enso-finance/enso-weiroll).
+</Info>
+
+## The Command and State Model
+
+Weiroll operates on two core concepts: **commands** and **state**.
+
+### Commands
+
+Commands are encoded instructions that tell the VM what operations to execute. Each command is represented as a `bytes32` value that encodes:
+
+- The target contract address
+- The function selector to call
+- Input/output parameter mappings
+- Execution flags and metadata
+
+```solidity
+function execute(
+    bytes32[] calldata commands,
+    bytes[] memory state
+) public payable returns (bytes[] memory)
+```
+
+The `commands` array defines the sequence of operations to execute in order.
+
+### State
+
+The state is a dynamic array of byte values that serves as:
+
+- **Input parameters** for function calls
+- **Storage for return values** from previous operations
+- **Intermediate data** passed between commands
+
+```solidity
+bytes[] memory state
+```
+
+The state array allows data to flow between commands - one command's output can become another command's input.
+
+<Tip>
+Think of Weiroll as a simple stack-based virtual machine where commands are opcodes and state is the working memory.
+</Tip>
+
+## How Weiroll Works
+
+### Execution Flow
+
+1. **Script Preparation**: Off-chain, you prepare a sequence of commands and initial state
+2. **Delegate Call**: Your contract calls the DeployableVM via `delegatecall`
+3. **Command Processing**: The VM iterates through each command:
+   - Reads input parameters from the state array
+   - Executes the encoded function call
+   - Stores return values back into the state
+4. **Return State**: The final state array is returned to the caller
+
+<CardGroup cols={2}>
+  <Card title="Off-Chain" icon="code">
+    Encode commands and prepare initial state using the Weiroll SDK
+  </Card>
+  <Card title="On-Chain" icon="ethereum">
+    Execute the script via delegatecall to the DeployableVM singleton
+  </Card>
+</CardGroup>
+
+### Example Use Cases
+
+<Accordion title="DeFi Composability">
+Execute complex DeFi strategies in a single transaction:
+- Borrow from a lending protocol
+- Swap tokens on a DEX
+- Provide liquidity
+- Stake LP tokens
+
+All without intermediate token transfers or approvals between contracts.
+</Accordion>
+
+<Accordion title="Governance Execution">
+Execute multiple governance actions atomically:
+- Update multiple parameters
+- Transfer funds
+- Upgrade contracts
+- Verify post-conditions
+</Accordion>
+
+<Accordion title="Account Abstraction">
+Implement smart contract wallets with:
+- Multi-step transaction batching
+- Conditional execution logic
+- Gas-efficient operation sequences
+</Accordion>
+
+## Key Benefits
+
+### Gas Efficiency
+
+By batching multiple operations into a single transaction and using efficient encoding, Weiroll significantly reduces gas costs compared to multiple separate transactions.
+
+### Trust Minimization
+
+The delegate-call execution model means:
+- Scripts execute in your contract's context
+- You maintain full control over your contract's state
+- No token approvals to external contracts needed
+
+<Warning>
+Because Weiroll uses delegatecall, any script has full access to your contract's storage and can make arbitrary calls. Only execute trusted scripts.
+</Warning>
+
+### Composability
+
+Weiroll enables composing arbitrary contract interactions without writing custom integration code for each protocol.
+
+## Design Philosophy
+
+Weiroll is designed with several key principles:
+
+1. **Simplicity**: The VM is intentionally simple, with minimal opcodes and straightforward execution
+2. **Safety**: Delegate-call only execution ensures scripts run in the caller's context
+3. **Efficiency**: Compact encoding and optimized execution minimize gas costs
+4. **Flexibility**: The command/state model supports arbitrary contract interactions
+
+<Note>
+The DeployableVM is a singleton contract deployed at a deterministic address across multiple chains, making it easy to integrate into your contracts.
+</Note>
+
+## Next Steps
+
+Now that you understand the basics of Weiroll, explore:
+
+- [Security Model](/concepts/security-model) - Learn about Weiroll's security guarantees
+- [Architecture](/concepts/architecture) - Dive deeper into the VM implementation
+- [Quickstart](/quickstart) - Start building with Weiroll

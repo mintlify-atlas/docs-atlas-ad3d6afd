@@ -1,0 +1,90 @@
+---
+title: 'DeployableVM'
+description: 'Weiroll VM implementation that can be deployed and used via delegatecall'
+---
+
+## Overview
+
+`DeployableVM` is a Solidity contract that provides a deployable implementation of the Weiroll VM for arbitrary contracts wanting to execute on-chain scripts. It inherits from Enso Finance's audited Weiroll VM contract and adds safety checks to ensure it's only called via delegatecall.
+
+## Contract Details
+
+### Inheritance
+
+```solidity
+contract DeployableVM is WeirollVM
+```
+
+Inherits from `WeirollVM` (Enso Finance's Weiroll VM implementation).
+
+### State Variables
+
+<ParamField path="WEIROLL_SINGLETON" type="address" required>
+  Immutable address storing the singleton deployment address of the DeployableVM contract. Set in the constructor to `address(this)` and used to prevent direct calls (non-delegatecall) to the `execute()` function.
+</ParamField>
+
+## Constructor
+
+```solidity
+constructor()
+```
+
+Initializes the contract by setting the `WEIROLL_SINGLETON` immutable variable to the deployment address.
+
+### Behavior
+
+- Sets `WEIROLL_SINGLETON = address(this)` to record the singleton address
+- This address is later used to detect delegatecall vs direct call patterns
+
+## Usage Example
+
+### Deploying the VM
+
+```solidity
+// Deploy the Weiroll VM singleton
+DeployableVM weiVm = new DeployableVM();
+```
+
+### Calling via Delegatecall (Correct Usage)
+
+```solidity
+// Prepare commands and state
+bytes32[] memory commands = new bytes32[](0);
+bytes[] memory state = new bytes[](0);
+
+// Execute via delegatecall
+(bool success, bytes memory result) = address(weiVm).delegatecall(
+    abi.encodeCall(DeployableVM.execute, (commands, state))
+);
+
+require(success, "Execution failed");
+bytes[] memory returnData = abi.decode(result, (bytes[]));
+```
+
+### Direct Call (Will Revert)
+
+```solidity
+// This will revert with CallableOnlyViaDelegateCall error
+weiVm.execute(commands, state); // ❌ REVERTS
+```
+
+<Warning>
+  The `DeployableVM` contract must only be called via delegatecall. Direct calls to the `execute()` function will revert with the `CallableOnlyViaDelegateCall()` error.
+</Warning>
+
+## Security Considerations
+
+<Note>
+  The delegatecall-only restriction is enforced to prevent misuse of the VM. With EIP-6780, the contract no longer needs to guard against `SELFDESTRUCT`, but the check remains as a safety measure for chains that may not support EIP-6780.
+</Note>
+
+## References
+
+- **Source Code**: `src/DeployableVM.sol`
+- **Enso Weiroll**: https://github.com/EnsoFinance/enso-weiroll
+- **Original Weiroll**: https://github.com/weiroll/weiroll
+
+## Related Documentation
+
+- [execute() Function](/api/functions#execute)
+- [CallableOnlyViaDelegateCall Error](/api/errors#callableonlyviadelegatecall)

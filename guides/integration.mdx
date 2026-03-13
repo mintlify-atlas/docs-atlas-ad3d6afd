@@ -1,0 +1,256 @@
+---
+title: Integration
+description: Integrate DeployableVM into your smart contracts
+---
+
+This guide shows you how to integrate Weiroll's DeployableVM into your smart contracts to enable on-chain scripting capabilities.
+
+## Understanding DeployableVM
+
+DeployableVM is a wrapper around Enso Finance's audited Weiroll VM that can be called via `delegatecall` from your contracts. It provides a flexible execution system for trust-minimized and gas-efficient scripting.
+
+<Info>
+  DeployableVM builds upon the original [weiroll](https://github.com/weiroll/weiroll) project and uses [Enso Finance's audited implementation](https://github.com/EnsoFinance/enso-weiroll).
+</Info>
+
+## Key Concepts
+
+### Delegatecall Pattern
+
+<Warning>
+  DeployableVM **must** be called via `delegatecall`. Direct calls will revert with `CallableOnlyViaDelegateCall` error.
+</Warning>
+
+The contract enforces this through an immutable singleton check:
+
+```solidity src/DeployableVM.sol:22-26
+function execute(bytes32[] calldata commands, bytes[] memory state) public payable returns (bytes[] memory) {
+    // Guard against direct calls - only delegatecall is allowed
+    require(address(this) != WEIROLL_SINGLETON, CallableOnlyViaDelegateCall());
+    
+    return _execute(commands, state);
+}
+```
+
+## Integration Steps
+
+<Steps>
+  <Step title="Import DeployableVM">
+    Add the import to your contract:
+
+    ```solidity
+    import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+    ```
+  </Step>
+
+  <Step title="Store the VM address">
+    Store a reference to the deployed DeployableVM singleton:
+
+    ```solidity
+    contract MyContract {
+        address public immutable weirollVM;
+        
+        constructor(address _weirollVM) {
+            weirollVM = _weirollVM;
+        }
+    }
+    ```
+
+    <Tip>
+      Use the canonical deployment address from the [networks.json](https://github.com/weiroll/weiroll/blob/main/networks.json) file for your target chain.
+    </Tip>
+  </Step>
+
+  <Step title="Execute scripts via delegatecall">
+    Call the VM's `execute` function using `delegatecall`:
+
+    ```solidity
+    function executeWeirollScript(
+        bytes32[] calldata commands,
+        bytes[] memory state
+    ) external payable returns (bytes[] memory) {
+        // Execute the weiroll script via delegatecall
+        (bool success, bytes memory result) = weirollVM.delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        require(success, "Weiroll execution failed");
+        
+        return abi.decode(result, (bytes[]));
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete Example
+
+Here's a complete example contract that integrates DeployableVM:
+
+```solidity contracts/WeirollIntegration.sol
+// SPDX-License-Identifier: LGPL-3.0-or-later
+pragma solidity ^0.8.27;
+
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+
+contract WeirollIntegration {
+    address public immutable weirollVM;
+    
+    event ScriptExecuted(bytes[] result);
+    
+    error ExecutionFailed(bytes reason);
+    
+    constructor(address _weirollVM) {
+        require(_weirollVM != address(0), "Invalid VM address");
+        weirollVM = _weirollVM;
+    }
+    
+    /**
+     * @notice Execute a weiroll script via delegatecall
+     * @param commands Array of encoded commands to execute
+     * @param state Initial state for the execution
+     * @return Final state after execution
+     */
+    function executeScript(
+        bytes32[] calldata commands,
+        bytes[] memory state
+    ) external payable returns (bytes[] memory) {
+        // Execute via delegatecall
+        (bool success, bytes memory result) = weirollVM.delegatecall(
+            abi.encodeCall(DeployableVM.execute, (commands, state))
+        );
+        
+        if (!success) {
+            revert ExecutionFailed(result);
+        }
+        
+        bytes[] memory finalState = abi.decode(result, (bytes[]));
+        emit ScriptExecuted(finalState);
+        
+        return finalState;
+    }
+    
+    /**
+     * @notice Allow contract to receive ETH
+     */
+    receive() external payable {}
+}
+```
+
+## Testing Your Integration
+
+Create tests to verify your integration works correctly:
+
+```solidity test/WeirollIntegration.t.sol
+// SPDX-License-Identifier: LGPL-3.0-or-later
+pragma solidity ^0.8.13;
+
+import {DeployableVM} from "weiroll/src/DeployableVM.sol";
+import {WeirollIntegration} from "../src/WeirollIntegration.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract WeirollIntegrationTest is Test {
+    DeployableVM public weiVm;
+    WeirollIntegration public integration;
+    
+    function setUp() public {
+        weiVm = new DeployableVM();
+        integration = new WeirollIntegration(address(weiVm));
+    }
+    
+    function test_executeEmptyScript() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        bytes[] memory result = integration.executeScript(commands, state);
+        assertEq(result.length, 0);
+    }
+    
+    function test_revertsOnDirectCall() public {
+        bytes32[] memory commands = new bytes32[](0);
+        bytes[] memory state = new bytes[](0);
+        
+        vm.expectRevert(DeployableVM.CallableOnlyViaDelegateCall.selector);
+        weiVm.execute(commands, state);
+    }
+}
+```
+
+Run the tests:
+
+```bash
+forge test --match-contract WeirollIntegrationTest -vvv
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Always use delegatecall">
+    Never call `execute()` directly on the DeployableVM contract. Always use `delegatecall`:
+
+    ```solidity
+    // ✅ Correct
+    (bool success, bytes memory result) = weirollVM.delegatecall(
+        abi.encodeCall(DeployableVM.execute, (commands, state))
+    );
+    
+    // ❌ Wrong - will revert
+    DeployableVM(weirollVM).execute(commands, state);
+    ```
+  </Step>
+
+  <Step title="Handle execution failures">
+    Always check the success return value and handle failures appropriately:
+
+    ```solidity
+    (bool success, bytes memory result) = weirollVM.delegatecall(...);
+    if (!success) {
+        // Bubble up the revert reason
+        assembly {
+            revert(add(result, 32), mload(result))
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Use immutable VM reference">
+    Store the VM address as `immutable` to save gas and prevent modifications:
+
+    ```solidity
+    address public immutable weirollVM;
+    ```
+  </Step>
+
+  <Step title="Validate inputs">
+    Validate commands and state before execution to prevent unexpected behavior:
+
+    ```solidity
+    require(commands.length > 0, "Empty commands");
+    require(state.length > 0, "Empty state");
+    ```
+  </Step>
+</Steps>
+
+## Security Considerations
+
+<Warning>
+  **EIP-6780 Protection**: DeployableVM includes protection against `SELFDESTRUCT` attacks, even though EIP-6780 has largely mitigated this risk. This ensures compatibility with chains that haven't implemented EIP-6780.
+</Warning>
+
+### Key Security Points
+
+1. **Delegatecall Context**: When using `delegatecall`, the VM executes in your contract's context with access to your storage and balance
+2. **Command Validation**: Ensure commands are properly validated before execution
+3. **Reentrancy**: Consider reentrancy guards if your contract holds valuable assets
+4. **Access Control**: Implement appropriate access controls on functions that execute weiroll scripts
+
+## Next Steps
+
+<Tip>
+  Ready to deploy? Check out the [Deployment Guide](/guides/deployment) to learn how to deploy DeployableVM to production.
+</Tip>
+
+## Resources
+
+- [Original Weiroll Documentation](https://github.com/weiroll/weiroll)
+- [Enso Finance Weiroll Fork](https://github.com/EnsoFinance/enso-weiroll)
+- [Source Code](https://github.com/weiroll/weiroll/blob/main/src/DeployableVM.sol)
