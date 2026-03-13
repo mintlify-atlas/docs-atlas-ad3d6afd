@@ -1,0 +1,73 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Weiroll",
+  "projectDescription": "A deployable, self-contained instance of Weiroll for trust-minimized and gas-efficient on-chain scripting",
+  "theme": "aspen",
+  "primaryColor": "#1e3a8a",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/understanding-weiroll",
+              "concepts/security-model",
+              "concepts/architecture"
+            ]
+          },
+          {
+            "group": "Developer Guide",
+            "pages": [
+              "guides/installation",
+              "guides/integration",
+              "guides/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Smart Contracts",
+            "pages": [
+              "api/deployable-vm",
+              "api/functions",
+              "api/errors"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/deployment-addresses",
+              "resources/examples",
+              "resources/migration-guide"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Deterministic deployment across multiple EVM chains",
+    "Delegate-call only execution for enhanced security",
+    "Gas-efficient on-chain scripting via Weiroll VM",
+    "Multi-chain deployment support (Ethereum, Optimism, Arbitrum, Base, Polygon, and more)"
+  ],
+  "publicApiSurface": [
+    "DeployableVM contract",
+    "execute(bytes32[] calldata commands, bytes[] memory state) returns (bytes[] memory)",
+    "CallableOnlyViaDelegateCall() error"
+  ]
+}
